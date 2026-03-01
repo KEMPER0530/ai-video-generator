@@ -5,6 +5,8 @@
 # Python cache
 __pycache__/
 *.pyc
+.venv/
+venv/
 
 # Build / generated
 outputs/
