@@ -113,9 +113,95 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 
 ## コマンド一覧
 
-- `doctor`: ffmpeg/ffprobe/TTS設定を検証
-- `tts`: シーン別音声 + `narration.wav` を生成
-- `srt`: シーン長ベースで `subtitles.srt` を生成
-- `render`: 画像 + 音声 + 字幕で `output.mp4` を生成
-- `all`: `tts -> srt -> render`
-- `clean`: 生成済みの `outputs` を削除
+共通の前提:
+- 通常コマンドは `--config` `--story` `--images-dir` を指定（`doctor` は `--config` のみ）
+- 例の `stories/<your-story>.json` は実在ファイル名に置き換える
+
+### 1) `doctor`
+環境チェック（ffmpeg/ffprobe/TTS設定）を実行します。
+
+```bash
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  doctor --config configs/config.docker.cpu.json
+```
+
+### 2) `tts`
+シーンごとの音声 (`audio/<scene_id>.wav`) と連結音声 (`audio/narration.wav`) を生成します。
+
+```bash
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  tts --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
+```
+
+### 3) `srt`
+字幕ファイルを生成します。`subtitles.srt` と `subtitles.ass` の両方を出力します。
+
+```bash
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  srt --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
+```
+
+### 4) `render`
+画像と音声を結合して `output.mp4` を生成します。
+
+```bash
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  render --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
+```
+
+### 5) `all`
+`tts -> srt(必要時) -> render` をまとめて実行します。通常はこれを使います。
+
+```bash
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
+```
+
+### 6) `clean`
+生成物を削除します。
+
+```bash
+# 指定configの out_dir だけ削除
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  clean --config configs/config.docker.cpu.json
+
+# outputs/ 以下を全部削除
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  clean --all
+```
+
+## 追加パラメータ（重要）
+
+### 字幕ON/OFF
+- `--no-subtitles`: 字幕を焼き込まない
+- `--with-subtitles`: 字幕を強制的に焼き込む
+- どちらも未指定の場合: `configs/config.docker.cpu.json` の `subtitles.enabled` を使用
+
+例（字幕なし）:
+```bash
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images --no-subtitles
+```
+
+例（字幕あり）:
+```bash
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images --with-subtitles
+```
+
+### 動画尺の制御
+- `--max-duration-sec <秒>`: 実行時に最大尺を上書き
+- 未指定の場合: `config` の `project.max_duration_sec` を使用
+- 例: `--max-duration-sec 60` で1分以内
+
+例（1分上限）:
+```bash
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images --max-duration-sec 60
+```
+
+### よく使う組み合わせ（字幕なし + 1分）
+```bash
+docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+  all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images --no-subtitles --max-duration-sec 60
+```
