@@ -1,0 +1,23 @@
+{
+  "title": "サンプル: 30秒Tips",
+  "scenes": [
+    {
+      "id": "s1",
+      "image": "../images/example/s1.png",
+      "on_screen_text": "結論を最初に伝える",
+      "narration": "最初の二秒で、結論を言います。"
+    },
+    {
+      "id": "s2",
+      "image": "../images/example/s2.png",
+      "on_screen_text": "手順を3つに分ける",
+      "narration": "次に、三つの手順に分けます。"
+    },
+    {
+      "id": "s3",
+      "image": "../images/example/s3.png",
+      "on_screen_text": "すぐ試せる一歩で締める",
+      "narration": "最後に、すぐに試せる一歩で締めます。"
+    }
+  ]
+}

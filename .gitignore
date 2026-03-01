@@ -1,0 +1,25 @@
+# OS / IDE
+.DS_Store
+.idea/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Build / generated
+outputs/
+tmp/
+*.aiff
+*.wav
+*.mp3
+*.mp4
+*.srt
+*.ass
+
+# Input assets (keep only examples in repo)
+stories/*.json
+!stories/story.example.json
+
+images/*
+!images/example/
+!images/example/**

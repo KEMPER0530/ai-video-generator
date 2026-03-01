@@ -1,0 +1,21 @@
+{
+  "project": {
+    "out_dir": "outputs/docker-all",
+    "width": 1080,
+    "height": 1920,
+    "fps": 24,
+    "use_source_size": true,
+    "max_duration_sec": 60
+  },
+  "tts": {
+    "engine": "gtts",
+    "voice": "ja",
+    "rate": 170
+  },
+  "subtitles": {
+    "enabled": false
+  },
+  "ffmpeg": {
+    "bin": "ffmpeg"
+  }
+}
