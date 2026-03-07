@@ -3,6 +3,70 @@
 取得済みの画像ファイルと台本JSONから、音声・字幕・動画ファイルを生成するプロダクトです。  
 画像生成は行いません。
 
+## プロジェクト構成図
+
+```text
+ai-video-generator/
+├─ run.py                    # CLIの入口（引数を受け取り、処理を呼ぶ）
+├─ domain/                   # 業務ルール（純粋ロジック）
+│  ├─ models.py              # 設定・台本の型とバリデーション
+│  ├─ video.py               # 尺調整や atempo など動画関連の計算
+│  ├─ subtitles.py           # 字幕分割・時刻変換など字幕ロジック
+│  └─ errors.py              # 共通エラー
+├─ application/              # ユースケース（処理の流れ）
+│  ├─ use_cases.py           # doctor/tts/srt/render/all/clean の本体
+│  ├─ pathing.py             # パス解決（images_dir など）
+│  ├─ ports.py               # 外部依存のインターフェース定義
+│  └─ dto.py                 # CLIから受け取るデータ構造
+├─ infrastructure/           # 外部ツール・ファイルI/O
+│  ├─ container.py           # 依存注入（組み立て）
+│  ├─ repositories.py        # JSON読込（config/story）
+│  ├─ process_runner.py      # subprocess 実行
+│  ├─ media_gateway.py       # ffmpeg/ffprobe 連携
+│  └─ narration_gateway.py   # gTTS/say/espeak-ng 連携
+├─ tests/                    # ユニットテスト
+├─ configs/                  # 設定JSON
+├─ stories/                  # 台本JSON
+├─ images/                   # 入力画像
+└─ outputs/                  # 生成結果
+```
+
+### 依存関係のイメージ
+
+```mermaid
+flowchart LR
+    CLI[run.py<br/>CLI入口] --> APP[application<br/>ユースケース]
+    APP --> DOM[domain<br/>業務ルール]
+    INF[infrastructure<br/>外部連携] --> APP
+    INF --> EXT[ffmpeg / ffprobe / gTTS / FileSystem]
+```
+
+## 各レイヤーの役割（やさしい解説）
+
+- `domain`
+  - 「何が正しいか」を決める層です。
+  - 例: 字幕の時間計算、設定値の検証。
+  - 外部ツールに依存しないので、テストしやすいです。
+- `application`
+  - 「何を、どの順番で行うか」を決める層です。
+  - 例: `all` なら `tts -> srt -> render` の順で実行。
+  - `domain` のロジックと `infrastructure` の機能をつなぎます。
+- `infrastructure`
+  - 「外の世界とやり取りする」層です。
+  - 例: ffmpeg 実行、JSONファイル読込、gTTS呼び出し。
+  - ここを差し替えると、実行環境の違いに対応しやすくなります。
+- `run.py`
+  - ユーザー入力（CLI引数）を受け取るだけの薄い入口です。
+  - 実際の処理は `application/use_cases.py` に委譲します。
+
+## 1本の動画ができるまで
+
+1. `run.py` がコマンド（例: `all`）と引数を受け取る
+2. `application` がユースケースを開始する
+3. `domain` が文字分割や時間計算などのルールを処理する
+4. `infrastructure` が ffmpeg/gTTS/ファイル操作を実行する
+5. `outputs/` に `output.mp4` などの成果物が出力される
+
 ## 最短手順（これだけでOK）
 
 1. 画像を `images/` に置く  
