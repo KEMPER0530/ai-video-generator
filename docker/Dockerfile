@@ -2,8 +2,10 @@ FROM python:3.11-alpine
 
 WORKDIR /work
 
+COPY requirements.txt /tmp/requirements.txt
+
 RUN apk add --no-cache ffmpeg bash curl fontconfig font-noto-cjk \
-  && pip install --no-cache-dir gTTS==2.5.4
+  && pip install --no-cache-dir -r /tmp/requirements.txt
 
 ENTRYPOINT ["python3", "run.py"]
 CMD ["--help"]
