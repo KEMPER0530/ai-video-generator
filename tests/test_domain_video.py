@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 尺調整とffmpeg atempo分解の計算を確認する。
 import pytest
 
 from domain.errors import AppError
@@ -26,4 +27,3 @@ def test_atempo_filter() -> None:
     assert atempo_filter(0.25) == "atempo=0.5,atempo=0.500000"
     with pytest.raises(AppError, match="Invalid speed for atempo"):
         atempo_filter(0.0)
-

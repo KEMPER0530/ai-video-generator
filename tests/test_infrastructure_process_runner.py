@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# subprocess実行ラッパーが失敗をAppErrorへ変換することを確認する。
 import subprocess
 from pathlib import Path
 
@@ -66,4 +67,3 @@ def test_check_output_success_and_failure(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setattr(subprocess, "check_output", fail_check_output)
     with pytest.raises(AppError, match="Command failed \\(3\\): x"):
         runner.check_output(["x"])
-

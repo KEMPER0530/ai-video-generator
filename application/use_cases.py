@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Callable
 
-from application.dto import CommonArgs
+from application.dto import CommonArgs, GenerateArgs
 from application.pathing import build_paths, resolve_images_dir, resolve_scene_image, subtitles_enabled
-from application.ports import ConfigRepository, MediaGateway, NarrationGateway, StoryRepository
+from application.ports import ConfigRepository, ImageGenerator, MediaGateway, NarrationGateway, StoryPlanner, StoryRepository
 from domain.errors import AppError
+from domain.generation import (
+    canonicalize_generated_story,
+    generated_story_path,
+    normalize_slug,
+    normalize_scene_count,
+    slugify_topic,
+    story_to_json_data,
+)
 from domain.models import CliOptions
 from domain.subtitles import (
     cue_char_weight,
@@ -20,6 +29,7 @@ from domain.subtitles import (
 from domain.video import atempo_filter, calc_duration_scale, max_duration_sec
 
 
+# 動画生成パイプラインの手順をまとめるアプリケーションサービス。
 class VideoPipelineUseCases:
     def __init__(
         self,
@@ -29,6 +39,8 @@ class VideoPipelineUseCases:
         narration: NarrationGateway,
         root: Path,
         emit: Callable[[str], None] = print,
+        story_planner: StoryPlanner | None = None,
+        image_generator: ImageGenerator | None = None,
     ):
         self._config_repo = config_repo
         self._story_repo = story_repo
@@ -36,13 +48,17 @@ class VideoPipelineUseCases:
         self._narration = narration
         self._root = root.resolve()
         self._emit = emit
+        self._story_planner = story_planner
+        self._image_generator = image_generator
 
     @staticmethod
     def _ensure_dir(path: Path) -> None:
+        # 各工程は必要な出力先を自分で作る。
         path.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _cli_options(args: CommonArgs) -> CliOptions:
+        # CLI引数をドメイン層の字幕/尺判定で使う形へ変換する。
         return CliOptions(
             no_subtitles=args.no_subtitles,
             with_subtitles=args.with_subtitles,
@@ -50,6 +66,7 @@ class VideoPipelineUseCases:
         )
 
     def doctor(self, config_path: Path) -> None:
+        # 外部コマンドとTTS設定が実行可能かを軽く確認する。
         config = self._config_repo.load_config(config_path)
         self._emit("Doctor checks:")
         ffmpeg_bin = self._media.which(config.ffmpeg.bin)
@@ -60,6 +77,7 @@ class VideoPipelineUseCases:
         self._emit(f"- tts: OK (engine={config.tts.engine}, voice={voice})")
 
     def tts(self, args: CommonArgs) -> None:
+        # 各シーンのnarrationから音声を作り、最後に1本のnarration.wavへ連結する。
         config = self._config_repo.load_config(args.config)
         story = self._story_repo.load_story(args.story)
         paths = build_paths(config, self._root)
@@ -69,6 +87,7 @@ class VideoPipelineUseCases:
         voice = self._narration.select_voice(config.tts.voice, config.tts.engine)
         scene_files: list[Path] = []
         for idx, scene in enumerate(story.scenes, start=1):
+            # 空のナレーションは音声も字幕も作れないため、ここで止める。
             narration = scene.narration.strip()
             if not narration:
                 raise AppError(f"scene[{idx}] missing narration")
@@ -86,6 +105,7 @@ class VideoPipelineUseCases:
 
         self._ensure_dir(paths.tmp)
         concat_list = paths.tmp / "concat_audio.txt"
+        # ffmpeg concat demuxer用に、シーン音声の一覧ファイルを作る。
         concat_list.write_text(
             "\n".join(f"file '{wav.as_posix()}'" for wav in scene_files) + "\n",
             encoding="utf-8",
@@ -109,6 +129,7 @@ class VideoPipelineUseCases:
         self._emit(f"Wrote {master_wav}")
 
     def srt(self, args: CommonArgs) -> None:
+        # 音声の実測時間から、SRTとASS字幕の表示タイミングを作る。
         config = self._config_repo.load_config(args.config)
         story = self._story_repo.load_story(args.story)
         paths = build_paths(config, self._root)
@@ -116,6 +137,7 @@ class VideoPipelineUseCases:
         height = config.project.height
         subtitle_font_px = max(38, int(height * 0.034))
         subtitle_margin_lr = max(96, int(width * 0.11))
+        # 画面幅とフォントサイズから、1行に収める安全な文字数を概算する。
         safe_line_chars = max(12, int((width - 2 * subtitle_margin_lr) / max(1, subtitle_font_px)))
 
         durations: list[float] = []
@@ -146,9 +168,11 @@ class VideoPipelineUseCases:
             if len(cues) <= 1:
                 gap = 0.0
             else:
+                # 複数キューの間に短い隙間を入れつつ、短い音声では隙間を詰める。
                 max_gap = max(0.0, (scaled_dur - len(cues) * 0.42) / (len(cues) - 1))
                 gap = min(0.05, max_gap)
             usable = max(0.05, scaled_dur - gap * max(0, len(cues) - 1))
+            # 長い字幕ほど長く表示し、句読点を含む字幕は少し余裕を持たせる。
             weights = [cue_char_weight(cue) for cue in cues]
             total_weight = float(sum(weights))
             seg_durations = [usable * (weight / total_weight) for weight in weights]
@@ -180,6 +204,7 @@ class VideoPipelineUseCases:
         out_srt = paths.out / "subtitles.srt"
         out_ass = paths.out / "subtitles.ass"
         out_srt.write_text("\n".join(srt_lines), encoding="utf-8")
+        # ASSはffmpeg subtitlesフィルタで装飾付き字幕として焼き込む。
         ass_content = "\n".join(
             [
                 "[Script Info]",
@@ -212,6 +237,7 @@ class VideoPipelineUseCases:
         self._emit(f"Wrote {out_ass}")
 
     def render(self, args: CommonArgs) -> None:
+        # 画像・音声・字幕をffmpegで結合し、最終MP4を書き出す。
         config = self._config_repo.load_config(args.config)
         story_path = args.story.resolve()
         story = self._story_repo.load_story(story_path)
@@ -222,6 +248,7 @@ class VideoPipelineUseCases:
         options = self._cli_options(args)
         use_subtitles = subtitles_enabled(options, config)
 
+        # render単体実行時に足りない成果物があれば、先に必要工程を案内する。
         audio = paths.audio / "narration.wav"
         if not audio.exists():
             raise AppError(f"Missing audio: {audio} (run: tts)")
@@ -237,6 +264,7 @@ class VideoPipelineUseCases:
         scene_durations: list[float] = []
         scene_images: list[Path] = []
         for idx, scene in enumerate(story.scenes, start=1):
+            # story内のimage指定と--images-dirの組み合わせから、実画像パスを解決する。
             image = resolve_scene_image(scene, story_path, idx, images_dir, self._root)
             if not image.exists():
                 raise AppError(f"Missing image for scene[{idx}]: {image}")
@@ -247,6 +275,7 @@ class VideoPipelineUseCases:
 
             duration = self._media.probe_duration(wav)
             if duration <= 0.05:
+                # 短すぎる音声はffmpeg concatの表示時間にできないため除外する。
                 continue
 
             scene_images.append(image)
@@ -259,6 +288,7 @@ class VideoPipelineUseCases:
         total_dur = sum(scene_durations)
         dur_scale = calc_duration_scale(total_dur, max_dur)
         for image, duration in zip(scene_images, scene_durations):
+            # 画像の表示時間は、対応するシーン音声の長さに合わせる。
             entries.append(f"file '{image.as_posix()}'")
             entries.append(f"duration {duration * dur_scale:.3f}")
         entries.append(entries[-2])
@@ -269,6 +299,7 @@ class VideoPipelineUseCases:
         height = config.project.height
         use_source_size = config.project.use_source_size
         if use_source_size:
+            # 元画像サイズを使う場合は、全シーン画像の解像度が一致している必要がある。
             base_w, base_h = self._media.probe_image_size(scene_images[0])
             for image in scene_images[1:]:
                 w, h = self._media.probe_image_size(image)
@@ -293,6 +324,7 @@ class VideoPipelineUseCases:
             str(audio),
         ]
         if dur_scale < 0.999:
+            # 尺上限に収めるため、映像表示時間と音声速度を同じ倍率で圧縮する。
             speed = 1.0 / dur_scale
             base_cmd.extend(["-filter:a", atempo_filter(speed)])
             self._emit(f"Duration fit: total {total_dur:.2f}s -> target scale {dur_scale:.4f} (audio speed x{speed:.4f})")
@@ -319,13 +351,16 @@ class VideoPipelineUseCases:
 
         vf_parts: list[str] = [f"fps={fps}"]
         if not use_source_size:
+            # 縦動画設定の解像度へ、拡大してから中央cropする。
             vf_parts.insert(0, f"crop={width}:{height}")
             vf_parts.insert(0, f"scale={width}:{height}:force_original_aspect_ratio=increase")
         if use_subtitles:
             if self._media.has_filter(ffmpeg_bin, "subtitles"):
+                # subtitlesフィルタが使える環境ではASSをそのまま焼き込む。
                 ass_path = ass.as_posix().replace("\\", "\\\\").replace(":", "\\:")
                 vf_parts.append(f"subtitles=filename={ass_path}:fontsdir=/usr/share/fonts")
             else:
+                # Dockerや最小ffmpeg環境ではsubtitlesが無いことがあるためdrawtextへ落とす。
                 self._emit("Subtitle filter not available. Fallback to drawtext burn-in from SRT.")
                 vf_parts.extend(drawtext_filters_from_srt(srt, paths.tmp / "drawtext", width, height))
         vf = ",".join(vf_parts)
@@ -333,6 +368,7 @@ class VideoPipelineUseCases:
         self._emit(f"Wrote {out_mp4}")
 
     def all(self, args: CommonArgs) -> None:
+        # 通常利用向けに、音声・字幕・レンダリングを正しい順番で実行する。
         config = self._config_repo.load_config(args.config)
         options = self._cli_options(args)
         self.tts(args)
@@ -340,7 +376,57 @@ class VideoPipelineUseCases:
             self.srt(args)
         self.render(args)
 
+    def generate(self, args: GenerateArgs) -> None:
+        # テーマから台本と画像を作り、そのまま既存のallパイプラインへ渡す。
+        if self._story_planner is None:
+            raise AppError("Story planner is not configured")
+        if self._image_generator is None:
+            raise AppError("Image generator is not configured")
+
+        config = self._config_repo.load_config(args.config)
+        paths = build_paths(config, self._root)
+        scene_count = normalize_scene_count(args.scene_count)
+        topic = args.topic.strip()
+        if not topic:
+            raise AppError("topic is required")
+        # slugは台本ファイル名・画像ファイル名・scene idの共通接頭辞として使う。
+        slug = normalize_slug(args.slug.strip() if args.slug else slugify_topic(topic))
+
+        tmp_dir = paths.tmp / "generate" / slug
+        story = self._story_planner.plan_story(topic, slug, scene_count, self._root, tmp_dir)
+        # Codex出力の揺れを、保存前にリポジトリ側の規約へそろえる。
+        story = canonicalize_generated_story(story, topic, slug, scene_count, args.images_dir)
+
+        story_path = generated_story_path(self._root, args.stories_dir, slug)
+        self._ensure_dir(story_path.parent)
+        story_path.write_text(json.dumps(story_to_json_data(story), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        self._emit(f"Wrote {story_path}")
+
+        total = len(story.scenes)
+        for idx, scene in enumerate(story.scenes, start=1):
+            image_path = self._root / scene.image
+            if image_path.exists() and not args.force_images:
+                # 既存画像を残せるようにし、必要時だけ--force-imagesで作り直す。
+                self._emit(f"Image exists, skipping: {image_path}")
+                continue
+            self._image_generator.generate_image(topic, scene, idx, total, image_path, self._root)
+            self._emit(f"Wrote {image_path}")
+
+        if args.render:
+            # 生成したstory/imagesを入力として、既存の動画生成フローを再利用する。
+            self.all(
+                CommonArgs(
+                    config=args.config,
+                    story=story_path,
+                    images_dir=args.images_dir,
+                    no_subtitles=args.no_subtitles,
+                    with_subtitles=args.with_subtitles,
+                    max_duration_sec=args.max_duration_sec,
+                )
+            )
+
     def clean(self, config_path: Path, clean_all: bool = False) -> None:
+        # 出力物だけを削除し、入力のstories/imagesは触らない。
         outputs_root = self._root / "outputs"
         self._ensure_dir(outputs_root)
         if clean_all:
@@ -357,4 +443,3 @@ class VideoPipelineUseCases:
             shutil.rmtree(paths.out)
         self._ensure_dir(paths.out)
         self._emit(f"Cleaned output dir: {paths.out}")
-

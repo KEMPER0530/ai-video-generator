@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# パス解決と字幕ON/OFF判定の境界条件を確認する。
 from pathlib import Path
 
 import pytest
@@ -96,4 +97,3 @@ def test_resolve_scene_image_without_image_uses_id_or_raises(tmp_path: Path) -> 
 
     with pytest.raises(AppError, match="missing required field: image"):
         resolve_scene_image(scene, story_path, 1, None, root)
-
