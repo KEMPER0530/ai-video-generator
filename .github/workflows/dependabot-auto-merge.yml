@@ -1,4 +1,4 @@
-name: Auto Merge Dependabot Security Updates
+name: Auto Merge Dependabot Updates
 
 on:
   workflow_run:
@@ -16,8 +16,8 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Merge Dependabot security pull requests
-        uses: actions/github-script@v7
+      - name: Merge eligible Dependabot pull requests
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -42,14 +42,18 @@ jobs:
               return;
             }
 
-            const isSecurityUpdate = pr.labels.some((label) => label.name === "security");
-            if (!isSecurityUpdate) {
-              core.info(`PR #${prNumber} is not a security update.`);
+            if (pr.state !== "open") {
+              core.info(`PR #${prNumber} is already closed.`);
               return;
             }
 
-            if (pr.state !== "open") {
-              core.info(`PR #${prNumber} is already closed.`);
+            const labels = new Set(pr.labels.map((label) => label.name));
+            const body = pr.body || "";
+            const isSecurityUpdate = labels.has("security");
+            const isPatchOrMinor = /update-type:\s+version-update:semver-(patch|minor)/.test(body);
+
+            if (!isSecurityUpdate && !isPatchOrMinor) {
+              core.info(`PR #${prNumber} is not a security, patch, or minor update.`);
               return;
             }
 
@@ -59,7 +63,7 @@ jobs:
                 repo,
                 pull_number: prNumber,
                 event: "APPROVE",
-                body: "Auto-approving Dependabot security update after tests passed."
+                body: "Auto-approving eligible Dependabot update after tests passed."
               });
             } catch (error) {
               core.info(`Approve step skipped: ${error.message}`);
@@ -72,4 +76,4 @@ jobs:
               merge_method: "squash"
             });
 
-            core.info(`Merged Dependabot security PR #${prNumber}.`);
+            core.info(`Merged eligible Dependabot PR #${prNumber}.`);
