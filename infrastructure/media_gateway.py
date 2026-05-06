@@ -6,6 +6,7 @@ from domain.errors import AppError
 from infrastructure.process_runner import SubprocessRunner
 
 
+# ffmpeg/ffprobeに関する操作をapplication層から隠すための実装。
 class FfmpegMediaGateway:
     def __init__(self, runner: SubprocessRunner):
         self._runner = runner
@@ -17,6 +18,7 @@ class FfmpegMediaGateway:
         self._runner.run(cmd, cwd=cwd)
 
     def probe_duration(self, path: Path) -> float:
+        # 音声ファイルの秒数は、字幕タイミングと画像表示時間の基準になる。
         ffprobe = self.which("ffprobe")
         out = self._runner.check_output(
             [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)]
@@ -27,6 +29,7 @@ class FfmpegMediaGateway:
             raise AppError(f"Failed to parse duration from ffprobe: {out}") from exc
 
     def probe_image_size(self, path: Path) -> tuple[int, int]:
+        # use_source_size=trueのとき、全画像のサイズ一致を検証するために使う。
         ffprobe = self.which("ffprobe")
         out = self._runner.check_output(
             [
@@ -49,9 +52,9 @@ class FfmpegMediaGateway:
             raise AppError(f"Failed to parse image size via ffprobe: {path} ({out})") from exc
 
     def has_filter(self, ffmpeg_bin: str, name: str) -> bool:
+        # 環境によってsubtitlesフィルタが無い場合があるため、実行前に確認する。
         try:
             out = self._runner.check_output([ffmpeg_bin, "-hide_banner", "-filters"], stderr_to_stdout=True)
         except AppError:
             return False
         return any(name in line.split() for line in out.splitlines())
-

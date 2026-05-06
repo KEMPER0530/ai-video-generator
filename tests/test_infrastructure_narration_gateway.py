@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 複数TTSエンジンの選択とWAV変換コマンドを確認する。
 import builtins
 import sys
 import types
@@ -146,4 +147,3 @@ def test_synthesize_say_espeak_and_unsupported(tmp_path: Path) -> None:
 
     with pytest.raises(AppError, match="Unsupported tts.engine"):
         gateway.synthesize_to_wav("hello", out_wav, "ja", 170, "bad", "ffmpeg")
-

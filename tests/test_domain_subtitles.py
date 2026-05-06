@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 字幕の時刻変換、分割、drawtextフォールバックを確認する。
 from pathlib import Path
 
 import pytest

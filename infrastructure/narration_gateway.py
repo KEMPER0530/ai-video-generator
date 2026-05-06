@@ -6,11 +6,13 @@ from domain.errors import AppError
 from infrastructure.process_runner import SubprocessRunner
 
 
+# gTTS / macOS say / espeak-ng を同じインターフェースで扱うTTS実装。
 class MultiEngineNarrationGateway:
     def __init__(self, runner: SubprocessRunner):
         self._runner = runner
 
     def select_voice(self, voice: str, engine: str) -> str:
+        # 実行前に声や言語が存在するか確認し、早めに分かりやすく失敗させる。
         if engine == "gtts":
             try:
                 from gtts.lang import tts_langs
@@ -41,6 +43,7 @@ class MultiEngineNarrationGateway:
         raise AppError(f"Unsupported tts.engine: {engine}")
 
     def _ffmpeg_convert_to_wav(self, ffmpeg_bin: str, in_path: Path, out_wav: Path) -> None:
+        # 後段の結合処理に合わせ、すべてのTTS出力をモノラル16kHz WAVへそろえる。
         out_wav.parent.mkdir(parents=True, exist_ok=True)
         self._runner.run(
             [
@@ -69,6 +72,7 @@ class MultiEngineNarrationGateway:
     ) -> None:
         out_wav.parent.mkdir(parents=True, exist_ok=True)
         if engine == "gtts":
+            # gTTSはMP3を生成するため、保存後にWAVへ変換する。
             try:
                 from gtts import gTTS
             except Exception as exc:
@@ -81,14 +85,15 @@ class MultiEngineNarrationGateway:
             self._ffmpeg_convert_to_wav(ffmpeg_bin, tmp_mp3, out_wav)
             return
         if engine == "say":
+            # macOS sayはAIFF出力を作り、ffmpegでWAVへ変換する。
             aiff = out_wav.with_suffix(".aiff")
             self._runner.run(["say", "-v", voice, "-r", str(rate), "-o", str(aiff), text])
             self._ffmpeg_convert_to_wav(ffmpeg_bin, aiff, out_wav)
             return
         if engine == "espeak-ng":
+            # espeak-ngはWAVを直接出せるが、形式統一のため再変換する。
             tmp_wav = out_wav.with_suffix(".espeak.wav")
             self._runner.run(["espeak-ng", "-v", voice, "-s", str(rate), "-w", str(tmp_wav), text])
             self._ffmpeg_convert_to_wav(ffmpeg_bin, tmp_wav, out_wav)
             return
         raise AppError(f"Unsupported tts.engine: {engine}")
-

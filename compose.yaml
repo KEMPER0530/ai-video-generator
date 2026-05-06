@@ -1,0 +1,27 @@
+services:
+  ai-video-generator:
+    container_name: ai-video-generator
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ai-video-generator-pipeline:latest
+    working_dir: /work
+    volumes:
+      - .:/work
+      - codex-home:/root/.codex
+      - codex-npm-cache:/root/.npm
+    environment:
+      # Dockerコンテナ自体を境界にして、Codexの二重サンドボックス失敗を避ける。
+      AI_VIDEO_CODEX_SANDBOX: danger-full-access
+      CODEX_HOME: /root/.codex
+    security_opt:
+      # Docker Desktopのseccomp差分でNode/Codex CLIが起動失敗する環境を避ける。
+      - seccomp=unconfined
+    stdin_open: true
+    tty: true
+    entrypoint: ["bash", "-lc"]
+    command: ["tail -f /dev/null"]
+
+volumes:
+  codex-home:
+  codex-npm-cache:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+# ユースケース層が各外部依存を正しい順序で呼ぶことを確認する。
+import json
 from pathlib import Path
 
 import pytest
 
-from application.dto import CommonArgs
+from application.dto import CommonArgs, GenerateArgs
 from application.use_cases import VideoPipelineUseCases
 from domain.errors import AppError
 from domain.models import AppConfig, FfmpegConfig, ProjectConfig, Scene, Story, SubtitlesConfig, TtsConfig
@@ -103,6 +105,26 @@ class FakeNarration:
         out_wav.write_text("wav", encoding="utf-8")
 
 
+class FakeStoryPlanner:
+    def __init__(self, story: Story):
+        self.story = story
+        self.calls: list[tuple[str, str, int, Path, Path]] = []
+
+    def plan_story(self, topic: str, slug: str, scene_count: int, root: Path, tmp_dir: Path) -> Story:
+        self.calls.append((topic, slug, scene_count, root, tmp_dir))
+        return self.story
+
+
+class FakeImageGenerator:
+    def __init__(self):
+        self.calls: list[tuple[str, Scene, int, int, Path, Path]] = []
+
+    def generate_image(self, topic: str, scene: Scene, index: int, total: int, output_path: Path, root: Path) -> None:
+        self.calls.append((topic, scene, index, total, output_path, root))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("png", encoding="utf-8")
+
+
 def make_use_cases(
     tmp_path: Path,
     config: AppConfig,
@@ -110,6 +132,8 @@ def make_use_cases(
     *,
     media: FakeMedia | None = None,
     narration: FakeNarration | None = None,
+    story_planner: FakeStoryPlanner | None = None,
+    image_generator: FakeImageGenerator | None = None,
     messages: list[str] | None = None,
 ) -> tuple[VideoPipelineUseCases, FakeMedia, FakeNarration, list[str]]:
     media_obj = media or FakeMedia()
@@ -120,6 +144,8 @@ def make_use_cases(
         story_repo=StaticStoryRepo(story),
         media=media_obj,
         narration=narration_obj,
+        story_planner=story_planner,
+        image_generator=image_generator,
         root=tmp_path,
         emit=msgs.append,
     )
@@ -339,6 +365,125 @@ def test_render_success_with_drawtext_and_scale(tmp_path: Path, monkeypatch: pyt
     assert "drawtext=test" in vf
     assert any("Fallback to drawtext burn-in from SRT." in message for message in messages)
     assert any("(no speed change)" in message for message in messages)
+
+
+def test_generate_writes_story_images_and_renders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = make_config(subtitles_enabled=False, out_dir="out")
+    planned_story = make_story(
+        Scene("raw1", "raw1.png", " First idea ", " First narration. ", ("Lambda",)),
+        Scene("raw2", "raw2.png", " Second idea ", " Second narration. ", ()),
+    )
+    planner = FakeStoryPlanner(planned_story)
+    image_generator = FakeImageGenerator()
+    use_cases, _, _, messages = make_use_cases(
+        tmp_path,
+        config,
+        planned_story,
+        story_planner=planner,
+        image_generator=image_generator,
+    )
+    render_calls: list[CommonArgs] = []
+    monkeypatch.setattr(use_cases, "all", lambda a: render_calls.append(a))
+
+    use_cases.generate(
+        GenerateArgs(
+            config=tmp_path / "config.json",
+            topic="AWS Lambda",
+            slug="lambda",
+            scene_count=2,
+            stories_dir="stories",
+            images_dir="images",
+            render=True,
+            with_subtitles=True,
+            max_duration_sec=60,
+        )
+    )
+
+    story_path = tmp_path / "stories" / "story.generated.lambda.json"
+    story_data = json.loads(story_path.read_text(encoding="utf-8"))
+    assert [scene["id"] for scene in story_data["scenes"]] == ["lambda_01", "lambda_02"]
+    assert [scene["image"] for scene in story_data["scenes"]] == ["images/lambda_01.png", "images/lambda_02.png"]
+    assert (tmp_path / "images" / "lambda_01.png").exists()
+    assert (tmp_path / "images" / "lambda_02.png").exists()
+    assert planner.calls == [("AWS Lambda", "lambda", 2, tmp_path.resolve(), tmp_path / "out" / "tmp" / "generate" / "lambda")]
+    assert [call[4] for call in image_generator.calls] == [
+        tmp_path.resolve() / "images" / "lambda_01.png",
+        tmp_path.resolve() / "images" / "lambda_02.png",
+    ]
+    assert render_calls == [
+        CommonArgs(
+            config=tmp_path / "config.json",
+            story=story_path,
+            images_dir="images",
+            no_subtitles=False,
+            with_subtitles=True,
+            max_duration_sec=60,
+        )
+    ]
+    assert any(message.startswith("Wrote ") for message in messages)
+
+
+def test_generate_skips_existing_images_and_respects_no_render(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = make_config(out_dir="out")
+    planned_story = make_story(Scene("raw", "raw.png", "Text", "Narration", ()))
+    planner = FakeStoryPlanner(planned_story)
+    image_generator = FakeImageGenerator()
+    use_cases, _, _, messages = make_use_cases(
+        tmp_path,
+        config,
+        planned_story,
+        story_planner=planner,
+        image_generator=image_generator,
+    )
+    monkeypatch.setattr(use_cases, "all", lambda a: pytest.fail("render should not run"))
+    existing_image = tmp_path / "custom-images" / "skip_01.png"
+    existing_image.parent.mkdir(parents=True, exist_ok=True)
+    existing_image.write_text("existing", encoding="utf-8")
+
+    use_cases.generate(
+        GenerateArgs(
+            config=tmp_path / "config.json",
+            topic="Skip images",
+            slug="skip",
+            scene_count=1,
+            images_dir="custom-images",
+            render=False,
+        )
+    )
+
+    story_data = json.loads((tmp_path / "stories" / "story.generated.skip.json").read_text(encoding="utf-8"))
+    assert story_data["scenes"][0]["image"] == "custom-images/skip_01.png"
+    assert image_generator.calls == []
+    assert any("Image exists, skipping" in message for message in messages)
+
+
+def test_generate_validates_dependencies_and_inputs(tmp_path: Path) -> None:
+    config = make_config(out_dir="out")
+    story = make_story(Scene("s1", "img.png", "text", "narration", ()))
+    planner = FakeStoryPlanner(story)
+    image_generator = FakeImageGenerator()
+
+    use_cases, _, _, _ = make_use_cases(tmp_path, config, story, image_generator=image_generator)
+    with pytest.raises(AppError, match="Story planner is not configured"):
+        use_cases.generate(GenerateArgs(config=tmp_path / "config.json", topic="AWS Lambda"))
+
+    use_cases, _, _, _ = make_use_cases(tmp_path, config, story, story_planner=planner)
+    with pytest.raises(AppError, match="Image generator is not configured"):
+        use_cases.generate(GenerateArgs(config=tmp_path / "config.json", topic="AWS Lambda"))
+
+    use_cases, _, _, _ = make_use_cases(
+        tmp_path,
+        config,
+        story,
+        story_planner=planner,
+        image_generator=image_generator,
+    )
+    with pytest.raises(AppError, match="topic is required"):
+        use_cases.generate(GenerateArgs(config=tmp_path / "config.json", topic=" "))
+    with pytest.raises(AppError, match="between 1 and 12"):
+        use_cases.generate(GenerateArgs(config=tmp_path / "config.json", topic="AWS Lambda", scene_count=0))
+    with pytest.raises(AppError, match="ASCII"):
+        use_cases.generate(GenerateArgs(config=tmp_path / "config.json", topic="AWS Lambda", slug="!!!"))
 
 
 def test_all_and_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

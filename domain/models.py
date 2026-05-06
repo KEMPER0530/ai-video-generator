@@ -7,6 +7,7 @@ from typing import Any
 from .errors import AppError
 
 
+# 1シーン分の入力データ。imageは台本JSON上の相対/絶対パス文字列。
 @dataclass(frozen=True)
 class Scene:
     id: str
@@ -16,12 +17,14 @@ class Scene:
     keywords: tuple[str, ...]
 
 
+# 動画全体の台本。各処理はこのStoryを中心に進む。
 @dataclass(frozen=True)
 class Story:
     title: str
     scenes: tuple[Scene, ...]
 
 
+# 出力解像度、fps、尺調整など動画生成全体の設定。
 @dataclass(frozen=True)
 class ProjectConfig:
     out_dir: str
@@ -32,6 +35,7 @@ class ProjectConfig:
     max_duration_sec: float
 
 
+# TTSエンジンごとの声・速度設定。
 @dataclass(frozen=True)
 class TtsConfig:
     engine: str
@@ -39,16 +43,19 @@ class TtsConfig:
     rate: int
 
 
+# 字幕焼き込みの既定値。
 @dataclass(frozen=True)
 class SubtitlesConfig:
     enabled: bool
 
 
+# ffmpegコマンド名を環境に合わせて差し替えるための設定。
 @dataclass(frozen=True)
 class FfmpegConfig:
     bin: str
 
 
+# config JSONをパースした後にアプリ全体で使う設定。
 @dataclass(frozen=True)
 class AppConfig:
     project: ProjectConfig
@@ -57,6 +64,7 @@ class AppConfig:
     ffmpeg: FfmpegConfig
 
 
+# out_dirから派生する成果物ディレクトリ群。
 @dataclass(frozen=True)
 class OutputPaths:
     root: Path
@@ -65,6 +73,7 @@ class OutputPaths:
     tmp: Path
 
 
+# CLIで一時的に上書きできる実行オプション。
 @dataclass(frozen=True)
 class CliOptions:
     no_subtitles: bool = False
@@ -73,6 +82,7 @@ class CliOptions:
 
 
 def _as_int(value: Any, label: str) -> int:
+    # JSON由来の値を明示的にintへ寄せ、失敗時はユーザー向けエラーにする。
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
@@ -80,6 +90,7 @@ def _as_int(value: Any, label: str) -> int:
 
 
 def _as_float(value: Any, label: str) -> float:
+    # JSONでは数値/文字列どちらで来ても扱えるようにする。
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
@@ -87,6 +98,7 @@ def _as_float(value: Any, label: str) -> float:
 
 
 def _as_bool(value: Any, label: str) -> bool:
+    # configではtrue/falseだけでなく、"yes"や"1"のような表記も許容する。
     if isinstance(value, bool):
         return value
     if isinstance(value, int):
@@ -101,6 +113,7 @@ def _as_bool(value: Any, label: str) -> bool:
 
 
 def parse_config(data: dict[str, Any]) -> AppConfig:
+    # 欠けている設定は既定値で補い、危険な値だけ明示的に弾く。
     project_raw = data.get("project", {}) or {}
     tts_raw = data.get("tts", {}) or {}
     subtitles_raw = data.get("subtitles", {}) or {}
@@ -130,6 +143,7 @@ def parse_config(data: dict[str, Any]) -> AppConfig:
 
 
 def _parse_keywords(raw: Any) -> tuple[str, ...]:
+    # keywordsは配列でも文字列でも受け取り、字幕強調に使いやすい形へ正規化する。
     if isinstance(raw, list):
         return tuple(str(x).strip() for x in raw if str(x).strip())
     if isinstance(raw, str):
@@ -142,6 +156,7 @@ def _parse_keywords(raw: Any) -> tuple[str, ...]:
 
 
 def parse_story(data: dict[str, Any]) -> Story:
+    # 台本JSONは最低限scenes配列を要求し、各シーンはSceneへ変換する。
     scenes_raw = data.get("scenes")
     if not isinstance(scenes_raw, list):
         raise AppError("story.scenes must be a list")
@@ -162,4 +177,3 @@ def parse_story(data: dict[str, Any]) -> Story:
         )
 
     return Story(title=str(data.get("title", "")).strip(), scenes=tuple(scenes))
-

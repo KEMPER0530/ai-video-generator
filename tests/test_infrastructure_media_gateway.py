@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# ffmpeg/ffprobeゲートウェイのコマンド呼び出しとパースを確認する。
 from pathlib import Path
 
 import pytest
@@ -88,4 +89,3 @@ def test_has_filter_true_false_and_error() -> None:
 
     runner.raise_error.add(key)
     assert gateway.has_filter("ffmpeg", "subtitles") is False
-
