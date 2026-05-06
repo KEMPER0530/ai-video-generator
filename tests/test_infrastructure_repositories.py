@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# JSONリポジトリの読み込み成功/失敗を確認する。
 from pathlib import Path
 
 import pytest
@@ -33,4 +34,3 @@ def test_json_repositories_errors(tmp_path: Path) -> None:
     broken.write_text("{", encoding="utf-8")
     with pytest.raises(AppError, match="Invalid JSON"):
         JsonStoryRepository().load_story(broken)
-

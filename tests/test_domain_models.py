@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# config/story JSONをドメインモデルへ変換する検証をまとめる。
 import pytest
 
 from domain.errors import AppError

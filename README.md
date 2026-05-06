@@ -1,7 +1,7 @@
 # ai-video-generator
 
 取得済みの画像ファイルと台本JSONから、音声・字幕・動画ファイルを生成するプロダクトです。  
-画像生成は行いません。
+Codex CLI 連携を使うと、テーマ入力から台本JSON・画像・字幕付きMP4まで一気通貫で生成できます。
 
 ## プロジェクト構成図
 
@@ -10,6 +10,7 @@ ai-video-generator/
 ├─ run.py                    # CLIの入口（引数を受け取り、処理を呼ぶ）
 ├─ domain/                   # 業務ルール（純粋ロジック）
 │  ├─ models.py              # 設定・台本の型とバリデーション
+│  ├─ generation.py          # 台本/画像生成用の正規化・JSON抽出
 │  ├─ video.py               # 尺調整や atempo など動画関連の計算
 │  ├─ subtitles.py           # 字幕分割・時刻変換など字幕ロジック
 │  └─ errors.py              # 共通エラー
@@ -22,6 +23,7 @@ ai-video-generator/
 │  ├─ container.py           # 依存注入（組み立て）
 │  ├─ repositories.py        # JSON読込（config/story）
 │  ├─ process_runner.py      # subprocess 実行
+│  ├─ codex_gateway.py       # Codex CLI連携（台本生成・$imagegen画像生成）
 │  ├─ media_gateway.py       # ffmpeg/ffprobe 連携
 │  └─ narration_gateway.py   # gTTS/say/espeak-ng 連携
 ├─ tests/                    # ユニットテスト
@@ -67,7 +69,52 @@ flowchart LR
 4. `infrastructure` が ffmpeg/gTTS/ファイル操作を実行する
 5. `outputs/` に `output.mp4` などの成果物が出力される
 
-## 最短手順（これだけでOK）
+## 最短手順（Codex CLIで一気通貫）
+
+前提:
+- ホストマシンに Codex CLI がインストールされ、ログイン済みであること
+- ffmpeg/ffprobe と Python 依存関係が利用できること
+- OpenAI APIキーは不要です。画像は Codex CLI の `$imagegen` 経由で、組み込み画像生成（gpt-image-2）を使います
+- Docker イメージには Codex CLI を含めていないため、`generate` はリポジトリ直下のホスト環境で実行します
+
+初回のみ:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+テーマを指定して、台本JSON・6枚の画像・字幕付きMP4まで生成:
+
+```bash
+python run.py generate "AWSのLambdaについて" \
+  --config configs/config.docker.cpu.json \
+  --slug lambda \
+  --scenes 6 \
+  --force-images \
+  --max-duration-sec 60
+```
+
+テーマを対話入力したい場合:
+
+```bash
+python run.py generate --slug lambda --scenes 6
+```
+
+出力先:
+- `stories/story.generated.lambda.json`
+  - Codex CLI が生成した台本JSON
+- `images/lambda_01.png` から `images/lambda_06.png`
+  - Codex CLI の `$imagegen` で生成した画像
+- `outputs/docker-all/output.mp4`
+  - 字幕付きの最終動画
+
+画像だけ作り直したくない場合は `--force-images` を外してください。既存画像があればスキップします。
+
+MP4生成を後回しにしたい場合は `--no-render` を付けます。
+
+## 最短手順（既存ファイルからDockerで作る）
 
 1. 画像を `images/` に置く  
 2. 台本を `stories/<your-story>.json` に書く  
@@ -179,9 +226,30 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 
 共通の前提:
 - 通常コマンドは `--config` `--story` `--images-dir` を指定（`doctor` は `--config` のみ）
+- `generate` は `--story` 不要です。Codex CLIで台本JSONと画像を先に生成します
 - 例の `stories/<your-story>.json` は実在ファイル名に置き換える
 
-### 1) `doctor`
+### 1) `generate`
+テーマから台本JSON・画像・字幕付きMP4をまとめて生成します。
+
+```bash
+python run.py generate "AWSのLambdaについて" \
+  --config configs/config.docker.cpu.json \
+  --slug lambda \
+  --scenes 6 \
+  --max-duration-sec 60
+```
+
+主なオプション:
+- `--slug`: 出力ファイル名の接頭辞
+- `--scenes`: 生成するシーン/画像の数（1から12）
+- `--stories-dir`: 台本JSONの出力先（既定: `stories`）
+- `--images-dir`: 画像の出力先（既定: `images`）
+- `--force-images`: 既存画像があっても再生成
+- `--no-render`: 台本JSONと画像だけ生成
+- `--no-subtitles` / `--with-subtitles`: MP4生成時の字幕ON/OFF
+
+### 2) `doctor`
 環境チェック（ffmpeg/ffprobe/TTS設定）を実行します。
 
 ```bash
@@ -189,7 +257,7 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
   doctor --config configs/config.docker.cpu.json
 ```
 
-### 2) `tts`
+### 3) `tts`
 シーンごとの音声 (`audio/<scene_id>.wav`) と連結音声 (`audio/narration.wav`) を生成します。
 
 ```bash
@@ -197,7 +265,7 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
   tts --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
 ```
 
-### 3) `srt`
+### 4) `srt`
 字幕ファイルを生成します。`subtitles.srt` と `subtitles.ass` の両方を出力します。
 
 ```bash
@@ -205,7 +273,7 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
   srt --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
 ```
 
-### 4) `render`
+### 5) `render`
 画像と音声を結合して `output.mp4` を生成します。
 
 ```bash
@@ -213,7 +281,7 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
   render --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
 ```
 
-### 5) `all`
+### 6) `all`
 `tts -> srt(必要時) -> render` をまとめて実行します。通常はこれを使います。
 
 ```bash
@@ -221,7 +289,7 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
   all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
 ```
 
-### 6) `clean`
+### 7) `clean`
 生成物を削除します。
 
 ```bash

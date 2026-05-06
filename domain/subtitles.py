@@ -7,6 +7,7 @@ from typing import Optional
 
 from .errors import AppError
 
+# ASS/drawtextのフォールバックで使う日本語対応フォント候補。
 FONT_CANDIDATES: tuple[str, ...] = (
     "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
     "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
@@ -17,6 +18,7 @@ FONT_CANDIDATES: tuple[str, ...] = (
 
 
 def format_srt_time(sec: float) -> str:
+    # SRTはミリ秒をカンマ区切りで表す。
     if sec < 0:
         sec = 0
     ms_total = int(round(sec * 1000.0))
@@ -30,6 +32,7 @@ def format_srt_time(sec: float) -> str:
 
 
 def format_ass_time(sec: float) -> str:
+    # ASSはセンチ秒をドット区切りで表す。
     if sec < 0:
         sec = 0
     cs_total = int(round(sec * 100.0))
@@ -43,6 +46,7 @@ def format_ass_time(sec: float) -> str:
 
 
 def srt_time_to_sec(ts: str) -> float:
+    # 既存SRTをdrawtextへ変換するとき、時刻を秒へ戻す。
     match = re.match(r"^(\d+):(\d{2}):(\d{2}),(\d{3})$", ts.strip())
     if not match:
         raise AppError(f"Invalid SRT time: {ts}")
@@ -51,6 +55,7 @@ def srt_time_to_sec(ts: str) -> float:
 
 
 def parse_srt(path: Path) -> list[tuple[float, float, str]]:
+    # SRTブロックを、開始秒・終了秒・字幕本文のタプルへ分解する。
     text = path.read_text(encoding="utf-8")
     blocks = re.split(r"\n\s*\n", text.strip(), flags=re.MULTILINE)
     cues: list[tuple[float, float, str]] = []
@@ -70,12 +75,14 @@ def parse_srt(path: Path) -> list[tuple[float, float, str]]:
 
 
 def escape_ass_text(text: str) -> str:
+    # ASSの制御文字として解釈されないように本文をエスケープする。
     escaped = text.replace("\\", r"\\")
     escaped = escaped.replace("{", r"\{").replace("}", r"\}")
     return escaped.replace("\n", r"\N")
 
 
 def caption_from_narration(text: str, width_chars: int = 22) -> str:
+    # ナレーションを画面幅に収まりやすい字幕行へ折り返す。
     chunks: list[str] = []
     for line in text.splitlines():
         line = line.strip()
@@ -92,15 +99,18 @@ def caption_from_narration(text: str, width_chars: int = 22) -> str:
         )
     punct_only = re.compile(r"^[、。,.!！?？・…ー〜～「」『』（）()\[\]【】\s]+$")
     if len(chunks) >= 2 and punct_only.fullmatch(chunks[-1]):
+        # 句読点だけが単独行になった場合は直前行へ戻す。
         chunks[-2] = f"{chunks[-2]}{chunks[-1]}"
         chunks.pop()
     if len(chunks) >= 2 and len(re.sub(r"\s+", "", chunks[-1])) <= 2:
+        # 1〜2文字だけの孤立行も見栄えが悪いので直前行へ寄せる。
         chunks[-2] = f"{chunks[-2]}{chunks[-1]}"
         chunks.pop()
     return "\n".join(chunks)
 
 
 def split_subtitle_cues(text: str, width_chars: int = 20, max_lines_per_cue: int = 2) -> list[str]:
+    # 句読点単位で分けてから折り返し、読みやすい字幕キューを作る。
     flat = " ".join(x.strip() for x in text.splitlines() if x.strip())
     if not flat:
         return []
@@ -114,6 +124,7 @@ def split_subtitle_cues(text: str, width_chars: int = 20, max_lines_per_cue: int
         current = clauses[i]
         current_len = len(re.sub(r"\s+", "", current))
         if current_len < 10 and i + 1 < len(clauses):
+            # 短すぎる文節は次の文節とまとめ、字幕の点滅感を減らす。
             merged.append((current + clauses[i + 1]).strip())
             i += 2
             continue
@@ -135,6 +146,7 @@ def split_subtitle_cues(text: str, width_chars: int = 20, max_lines_per_cue: int
 
 
 def cue_char_weight(text: str) -> int:
+    # 文字数だけでなく句読点の間も少し長めに見積もる。
     raw = re.sub(r"\s+", "", text)
     count = len(raw)
     count += raw.count("、") * 2 + raw.count("。") * 4 + raw.count("！") * 3 + raw.count("？") * 3
@@ -143,6 +155,7 @@ def cue_char_weight(text: str) -> int:
 
 
 def find_fontfile(candidates: Optional[tuple[str, ...]] = None) -> Optional[Path]:
+    # 実行環境ごとに存在するフォントが違うため、候補順に探す。
     for raw in candidates or FONT_CANDIDATES:
         path = Path(raw)
         if path.exists():
@@ -151,6 +164,7 @@ def find_fontfile(candidates: Optional[tuple[str, ...]] = None) -> Optional[Path
 
 
 def drawtext_filters_from_srt(srt_path: Path, tmp_dir: Path, width: int, height: int) -> list[str]:
+    # ffmpegのsubtitlesフィルタが使えない環境向けに、drawtextで字幕を焼き込む。
     cues = parse_srt(srt_path)
     tmp_dir.mkdir(parents=True, exist_ok=True)
     fontfile = find_fontfile()
@@ -172,10 +186,10 @@ def drawtext_filters_from_srt(srt_path: Path, tmp_dir: Path, width: int, height:
 
     filters: list[str] = []
     for idx, (start, end, cue_text) in enumerate(cues, start=1):
+        # 長い字幕本文はコマンドライン直書きではなくtextfile経由で渡す。
         textfile = tmp_dir / f"sub_{idx:04d}.txt"
         textfile.write_text(cue_text, encoding="utf-8")
         escaped_textfile = textfile.as_posix().replace("\\", "\\\\").replace(":", r"\:")
         opts = [f"textfile={escaped_textfile}", *base, f"enable='between(t,{start:.3f},{end:.3f})'"]
         filters.append("drawtext=" + ":".join(opts))
     return filters
-

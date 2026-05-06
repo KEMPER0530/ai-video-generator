@@ -1,3 +1,3 @@
 class AppError(Exception):
-    """Application-level exception."""
-
+    # ユーザーにそのまま返してよい、想定内のアプリケーションエラー。
+    pass
