@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import re
 from pathlib import Path
@@ -23,6 +24,12 @@ def slugify_topic(topic: str) -> str:
     if tokens:
         return "_".join(tokens[:4])
     return "generated"
+
+
+def default_generated_slug(topic: str, now: datetime | None = None) -> str:
+    # 明示slugがない通常利用では、同じテーマでも上書きしないよう実行時刻を付ける。
+    timestamp = (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
+    return normalize_slug(f"{slugify_topic(topic)}_{timestamp}")
 
 
 # ユーザー指定slugは、ファイル名に使いやすい小文字ASCIIへそろえる。

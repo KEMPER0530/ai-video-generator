@@ -11,10 +11,10 @@ from application.ports import ConfigRepository, ImageGenerator, MediaGateway, Na
 from domain.errors import AppError
 from domain.generation import (
     canonicalize_generated_story,
+    default_generated_slug,
     generated_story_path,
     normalize_slug,
     normalize_scene_count,
-    slugify_topic,
     story_to_json_data,
 )
 from domain.models import CliOptions
@@ -390,7 +390,8 @@ class VideoPipelineUseCases:
         if not topic:
             raise AppError("topic is required")
         # slugは台本ファイル名・画像ファイル名・scene idの共通接頭辞として使う。
-        slug = normalize_slug(args.slug.strip() if args.slug else slugify_topic(topic))
+        # 未指定時は実行時刻を含め、同じテーマの再生成で上書きしないようにする。
+        slug = normalize_slug(args.slug.strip()) if args.slug else default_generated_slug(topic)
 
         tmp_dir = paths.tmp / "generate" / slug
         story = self._story_planner.plan_story(topic, slug, scene_count, self._root, tmp_dir)

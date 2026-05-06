@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# docker composeが作った常駐コンテナを、Composeラベルから自動で見つける。
+container_id="$(docker ps --filter label=com.docker.compose.service=ai-video-generator -q | head -n 1)"
+
+if [[ -z "${container_id}" ]]; then
+  echo "ai-video-generator container is not running. Run: docker compose build && docker compose up -d" >&2
+  exit 1
+fi
+
+if [[ -t 0 && -t 1 ]]; then
+  # ローカル端末では対話入力できるようTTYを割り当てる。
+  exec docker exec -it "${container_id}" "$@"
+fi
+
+exec docker exec "${container_id}" "$@"

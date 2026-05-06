@@ -69,60 +69,82 @@ flowchart LR
 4. `infrastructure` が ffmpeg/gTTS/ファイル操作を実行する
 5. `outputs/` に `output.mp4` などの成果物が出力される
 
-## 最短手順（Codex CLIで一気通貫）
+## 最短手順（Docker常駐で一気通貫）
 
 前提:
-- ホストマシンに Codex CLI がインストールされ、ログイン済みであること
-- ffmpeg/ffprobe と Python 依存関係が利用できること
+- Docker / Docker Compose が利用できること
 - OpenAI APIキーは不要です。画像は Codex CLI の `$imagegen` 経由で、組み込み画像生成（gpt-image-2）を使います
-- Docker イメージには Codex CLI を含めていないため、`generate` はリポジトリ直下のホスト環境で実行します
+- Docker イメージ内に Node/npx、ffmpeg、Python 依存関係を含め、Codex CLI は初回実行時にコンテナ内キャッシュへ取得します
 
-初回のみ:
+コンテナを常時起動:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+docker compose build
+docker compose up -d
 ```
 
-テーマを指定して、台本JSON・6枚の画像・字幕付きMP4まで生成:
+初回のみ、コンテナ内の Codex CLI にログイン:
 
 ```bash
-python run.py generate "AWSのLambdaについて" \
-  --config configs/config.docker.cpu.json \
-  --slug lambda \
+./docker/exec codex
+```
+
+初回は Codex CLI パッケージの取得で少し時間がかかります。取得済みパッケージとログイン情報は Docker volume に残ります。
+
+対話モードでテーマを聞かせる:
+
+```bash
+./docker/exec ai-video-generator generate \
   --scenes 6 \
-  --force-images \
   --max-duration-sec 60
 ```
 
-テーマを対話入力したい場合:
+このコマンドを実行すると、次のように聞かれます。
+
+```text
+何について動画を生成しますか？
+```
+
+ここで `AWSのLambdaについて` のように入力すると、台本JSON・6枚の画像・字幕付きMP4まで生成します。
+
+テーマをコマンドで直接指定したい場合:
 
 ```bash
-python run.py generate --slug lambda --scenes 6
+./docker/exec ai-video-generator generate "AWSのLambdaについて" \
+  --scenes 6 \
+  --max-duration-sec 60
 ```
 
 出力先:
-- `stories/story.generated.lambda.json`
+- `stories/story.generated.aws_lambda_20260506_123456.json` のようなファイル
   - Codex CLI が生成した台本JSON
-- `images/lambda_01.png` から `images/lambda_06.png`
+- `images/aws_lambda_20260506_123456_01.png` から `_06.png` のようなファイル
   - Codex CLI の `$imagegen` で生成した画像
 - `outputs/docker-all/output.mp4`
   - 字幕付きの最終動画
 
-画像だけ作り直したくない場合は `--force-images` を外してください。既存画像があればスキップします。
+通常はファイル名に実行時刻が入るため、同じテーマを再生成しても前回分を上書きしません。
+
+意図的に固定名にしたい場合だけ `--slug <名前>` を指定します。
 
 MP4生成を後回しにしたい場合は `--no-render` を付けます。
 
-## 最短手順（既存ファイルからDockerで作る）
+常駐コンテナを止める場合:
+
+```bash
+docker compose down
+```
+
+## 最短手順（既存ファイルから常駐Dockerで作る）
 
 1. 画像を `images/` に置く  
 2. 台本を `stories/<your-story>.json` に書く  
-3. 実行する（Docker）
+3. 常駐コンテナにコマンドを実行する
 
 ```bash
-docker build -f docker/Dockerfile -t ai-video-generator-pipeline:latest .
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+docker compose build
+docker compose up -d
+./docker/exec ai-video-generator \
   all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
 ```
 
@@ -200,25 +222,24 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 - `image` が相対パスなら `--images-dir` 基準で解決
 - `image` を省略したシーンは `<id>.png` を `--images-dir` から自動解決
 
-## 実行コマンド（Docker）
+## 実行コマンド（常駐Docker）
 
-### docker run で直接実行（これのみ）
+### コンテナ起動
 
 ```bash
-docker build -f docker/Dockerfile -t ai-video-generator-pipeline:latest .
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
-  all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
+docker compose build
+docker compose up -d
 ```
 
 生成物のクリーンアップ:
 
 ```bash
 # 指定configの out_dir だけ削除
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   clean --config configs/config.docker.cpu.json
 
 # outputs/ 以下を全部削除
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   clean --all
 ```
 
@@ -233,15 +254,13 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 テーマから台本JSON・画像・字幕付きMP4をまとめて生成します。
 
 ```bash
-python run.py generate "AWSのLambdaについて" \
-  --config configs/config.docker.cpu.json \
-  --slug lambda \
+./docker/exec ai-video-generator generate "AWSのLambdaについて" \
   --scenes 6 \
   --max-duration-sec 60
 ```
 
 主なオプション:
-- `--slug`: 出力ファイル名の接頭辞
+- `--slug`: 出力ファイル名の接頭辞（未指定ならトピック + 実行時刻で自動生成）
 - `--scenes`: 生成するシーン/画像の数（1から12）
 - `--stories-dir`: 台本JSONの出力先（既定: `stories`）
 - `--images-dir`: 画像の出力先（既定: `images`）
@@ -253,7 +272,7 @@ python run.py generate "AWSのLambdaについて" \
 環境チェック（ffmpeg/ffprobe/TTS設定）を実行します。
 
 ```bash
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   doctor --config configs/config.docker.cpu.json
 ```
 
@@ -261,7 +280,7 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 シーンごとの音声 (`audio/<scene_id>.wav`) と連結音声 (`audio/narration.wav`) を生成します。
 
 ```bash
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   tts --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
 ```
 
@@ -269,7 +288,7 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 字幕ファイルを生成します。`subtitles.srt` と `subtitles.ass` の両方を出力します。
 
 ```bash
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   srt --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
 ```
 
@@ -277,7 +296,7 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 画像と音声を結合して `output.mp4` を生成します。
 
 ```bash
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   render --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
 ```
 
@@ -285,7 +304,7 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 `tts -> srt(必要時) -> render` をまとめて実行します。通常はこれを使います。
 
 ```bash
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images
 ```
 
@@ -294,11 +313,11 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 
 ```bash
 # 指定configの out_dir だけ削除
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   clean --config configs/config.docker.cpu.json
 
 # outputs/ 以下を全部削除
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   clean --all
 ```
 
@@ -311,13 +330,13 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 
 例（字幕なし）:
 ```bash
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images --no-subtitles
 ```
 
 例（字幕あり）:
 ```bash
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images --with-subtitles
 ```
 
@@ -328,12 +347,12 @@ docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
 
 例（1分上限）:
 ```bash
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images --max-duration-sec 60
 ```
 
 ### よく使う組み合わせ（字幕なし + 1分）
 ```bash
-docker run --rm -v "$(pwd):/work" -w /work ai-video-generator-pipeline:latest \
+./docker/exec ai-video-generator \
   all --config configs/config.docker.cpu.json --story stories/<your-story>.json --images-dir ../images --no-subtitles --max-duration-sec 60
 ```

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # Codex生成結果を保存可能な台本/画像パスへ正規化する処理を確認する。
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 from domain.errors import AppError
 from domain.generation import (
     canonicalize_generated_story,
+    default_generated_slug,
     extract_json_payload,
     generated_story_path,
     normalize_scene_count,
@@ -26,6 +28,8 @@ def test_scene_count_and_slug_helpers() -> None:
     assert slugify_topic("AWS Lambda for beginners") == "aws_lambda_for_beginners"
     assert slugify_topic("!!!") == "generated"
     assert normalize_slug("AWS Lambda!") == "aws_lambda"
+    assert default_generated_slug("AWS Lambda", datetime(2026, 5, 6, 12, 34, 56)) == "aws_lambda_20260506_123456"
+    assert default_generated_slug("日本語だけ", datetime(2026, 5, 6, 12, 34, 56)) == "generated_20260506_123456"
     assert scene_id("lambda", 2) == "lambda_02"
     assert scene_image_ref("lambda", 2) == "images/lambda_02.png"
     assert scene_image_ref("lambda", 2, "assets/generated") == "assets/generated/lambda_02.png"

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Docker内では常にマウントされたリポジトリ直下のrun.pyを、専用venvのPythonで起動する。
+exec /opt/ai-video-generator-venv/bin/python /work/run.py "$@"
