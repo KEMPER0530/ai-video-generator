@@ -11,10 +11,17 @@ from infrastructure.process_runner import SubprocessRunner
 
 # Codex CLIに台本JSONの作成を依頼する実装。
 class CodexCliStoryPlanner:
-    def __init__(self, runner: SubprocessRunner, codex_bin: str = "codex", model: str | None = None):
+    def __init__(
+        self,
+        runner: SubprocessRunner,
+        codex_bin: str = "codex",
+        model: str | None = None,
+        sandbox: str = "workspace-write",
+    ):
         self._runner = runner
         self._codex_bin = codex_bin
         self._model = model
+        self._sandbox = sandbox
 
     def plan_story(self, topic: str, slug: str, scene_count: int, root: Path, tmp_dir: Path) -> Story:
         tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -43,7 +50,7 @@ class CodexCliStoryPlanner:
             str(root),
             "--skip-git-repo-check",
             "--sandbox",
-            "workspace-write",
+            self._sandbox,
         ]
         if self._model:
             cmd.extend(["--model", self._model])
@@ -52,10 +59,17 @@ class CodexCliStoryPlanner:
 
 # Codex CLIの$imagegenを使って、シーンごとの画像を生成する実装。
 class CodexCliImageGenerator:
-    def __init__(self, runner: SubprocessRunner, codex_bin: str = "codex", model: str | None = None):
+    def __init__(
+        self,
+        runner: SubprocessRunner,
+        codex_bin: str = "codex",
+        model: str | None = None,
+        sandbox: str = "workspace-write",
+    ):
         self._runner = runner
         self._codex_bin = codex_bin
         self._model = model
+        self._sandbox = sandbox
 
     def generate_image(self, topic: str, scene: Scene, index: int, total: int, output_path: Path, root: Path) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -66,7 +80,7 @@ class CodexCliImageGenerator:
             raise AppError(f"Codex image generation did not create expected file: {output_path}")
 
     def _base_cmd(self, root: Path) -> list[str]:
-        # 画像生成もworkspace-writeにして、指定パスへのPNG保存を許可する。
+        # 画像生成も設定されたサンドボックスで実行し、指定パスへのPNG保存を許可する。
         cmd = [
             self._runner.which(self._codex_bin),
             "exec",
@@ -74,7 +88,7 @@ class CodexCliImageGenerator:
             str(root),
             "--skip-git-repo-check",
             "--sandbox",
-            "workspace-write",
+            self._sandbox,
         ]
         if self._model:
             cmd.extend(["--model", self._model])

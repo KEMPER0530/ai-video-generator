@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ビルド時にNodeを起動すると古いDocker seccompで落ちるため、実行時にnpx経由でCodex CLIを呼ぶ。
+exec npx -y @openai/codex "$@"

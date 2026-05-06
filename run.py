@@ -24,7 +24,7 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     # CLIは薄く保ち、実処理はapplication層のユースケースへ委譲する。
-    parser = argparse.ArgumentParser(prog="ai-video-generator/run.py")
+    parser = argparse.ArgumentParser(prog="ai-video-generator")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_doc = sub.add_parser("doctor", help="check local dependencies")
@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_generate = sub.add_parser("generate", help="generate story/images, then render output.mp4")
     p_generate.add_argument("topic", nargs="?", help="Video topic. If omitted, prompt interactively.")
     p_generate.add_argument("--config", default="configs/config.docker.cpu.json")
-    p_generate.add_argument("--slug", default=None, help="Output filename prefix. Defaults to an ASCII slug from topic.")
+    p_generate.add_argument("--slug", default=None, help="Fixed output prefix. Defaults to topic plus timestamp.")
     p_generate.add_argument("--scenes", type=int, default=6, help="Number of scenes/images to generate.")
     p_generate.add_argument("--stories-dir", default="stories")
     p_generate.add_argument("--images-dir", default="images")
