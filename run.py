@@ -15,8 +15,9 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--story", required=True)
     parser.add_argument("--images-dir", required=True, help="Base directory for scene images.")
-    parser.add_argument("--no-subtitles", action="store_true", help="Disable subtitle burn-in for this run.")
-    parser.add_argument("--with-subtitles", action="store_true", help="Enable subtitle burn-in for this run.")
+    subtitle_group = parser.add_mutually_exclusive_group()
+    subtitle_group.add_argument("--no-subtitles", action="store_true", help="Disable subtitle burn-in for this run.")
+    subtitle_group.add_argument("--with-subtitles", action="store_true", help="Enable subtitle burn-in for this run.")
     parser.add_argument("--max-duration-sec", type=float, default=None, help="Target max output duration in seconds.")
 
 
