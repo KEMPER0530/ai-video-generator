@@ -4,14 +4,30 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "chore"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "chore"
+
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
