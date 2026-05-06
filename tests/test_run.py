@@ -50,6 +50,25 @@ def test_build_parser_and_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     assert called_names == ["doctor", "tts", "srt", "render", "all", "clean"]
 
 
+def test_subtitle_flags_are_mutually_exclusive() -> None:
+    parser = run.build_parser()
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(
+            [
+                "all",
+                "--config",
+                "c.json",
+                "--story",
+                "s.json",
+                "--images-dir",
+                "img",
+                "--no-subtitles",
+                "--with-subtitles",
+            ]
+        )
+    assert exc.value.code == 2
+
+
 def test_main_handles_app_error(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     dummy = DummyUseCases()
     dummy.raise_error = True
@@ -71,4 +90,3 @@ def test_main_unsupported_command_branch(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(run, "build_use_cases", lambda root, emit=print: DummyUseCases())
     with pytest.raises(RuntimeError, match="unsupported command"):
         run.main([])
-
