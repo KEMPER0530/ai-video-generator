@@ -1,4 +1,4 @@
-FROM node:22-alpine AS node-runtime
+FROM node:26-alpine AS node-runtime
 
 FROM python:3.14-alpine
 
