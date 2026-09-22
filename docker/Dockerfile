@@ -1,6 +1,6 @@
 FROM node:22-alpine AS node-runtime
 
-FROM python:3.14-alpine
+FROM python:3.14.5-alpine
 
 WORKDIR /work
 
